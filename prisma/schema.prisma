@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobStatus {
+  queued
+  running
+  done
+  partial
+  failed
+}
+
+enum JobPriority {
+  normal
+  high
+}
+
+enum JobItemStatus {
+  pending
+  ok
+  error
+  blocked
+}
+
+model Job {
+  id        String      @id @default(uuid())
+  status    JobStatus   @default(queued)
+  priority  JobPriority @default(normal)
+  total     Int
+  processed Int         @default(0)
+  failed    Int         @default(0)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  items JobItem[]
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model JobItem {
+  id             String        @id @default(uuid())
+  jobId          String
+  url            String
+  status         JobItemStatus @default(pending)
+  error          String?
+  attempts       Int           @default(0)
+  lastStatusCode Int?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([jobId, url])
+  @@index([jobId])
+  @@index([status])
+}
+
+model Profile {
+  id               String   @id @default(uuid())
+  sourceUrl        String   @unique
+  username         String?
+  displayName      String?
+  bio              String?
+  avatarUrl        String?
+  coverUrl         String?
+  publicStats      Json?
+  links            Json?
+  scrapedAt        DateTime
+  rawHtmlChecksum  String
+
+  @@index([username])
+  @@index([displayName])
+}
