@@ -1,14 +1,19 @@
 import { Router } from 'express';
+import type { Container } from 'inversify';
 import healthRoutes from './health';
-import crawlRoutes from './crawl.routes';
-import jobRoutes from './job.routes';
-import profileRoutes from './profile.routes';
+import { createCrawlRoutes } from './crawl.routes';
+import { createJobRoutes } from './job.routes';
+import { createProfileRoutes } from './profile.routes';
 
-const router = Router();
+export const createRoutes = (container: Container): Router => {
+  const router = Router();
 
-router.use(healthRoutes);
-router.use(crawlRoutes);
-router.use(jobRoutes);
-router.use(profileRoutes);
+  router.use(healthRoutes);
+  router.use(createCrawlRoutes(container));
+  router.use(createJobRoutes(container));
+  router.use(createProfileRoutes(container));
 
-export default router;
+  return router;
+};
+
+export default createRoutes;

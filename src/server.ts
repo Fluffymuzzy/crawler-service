@@ -1,12 +1,20 @@
+import 'reflect-metadata';
 import { createServer } from 'http';
 import { config } from './config';
-import { logger } from './utils/logger';
 import { createApp } from './app';
-import { prismaService } from './db/prisma';
+import { container } from './container';
+import type { ILogger } from './interfaces/external/logger.interface';
+import type { IDatabase } from './interfaces/external/database.interface';
+import type { IMessageQueue } from './interfaces/external/message-queue.interface';
+import { TYPES } from './container/types';
 import { closeCrawlQueue } from './queue/crawl.queue';
 import { closeRedisConnection } from './queue/connection';
 
-const app = createApp();
+const logger = container.get<ILogger>(TYPES.Logger);
+const database = container.get<IDatabase>(TYPES.Database);
+const messageQueue = container.get<IMessageQueue>(TYPES.MessageQueue);
+
+const app = createApp(container);
 const server = createServer(app);
 
 let isShuttingDown = false;
@@ -21,25 +29,28 @@ const gracefulShutdown = (signal: string): void => {
 
   server.close((err) => {
     if (err) {
-      logger.error({ err }, 'Error during server shutdown');
+      logger.error('Error during server shutdown', err);
       process.exit(1);
     }
     logger.info('HTTP server closed');
 
     void (async (): Promise<void> => {
       try {
+        await messageQueue.close();
+        logger.info('Message queue closed');
+
         await closeCrawlQueue();
-        logger.info('Queue closed');
+        logger.info('Legacy queue closed');
 
         await closeRedisConnection();
         logger.info('Redis connection closed');
 
-        await prismaService.disconnect();
+        await database.disconnect();
         logger.info('Database connection closed');
 
         process.exit(0);
       } catch (error) {
-        logger.error({ error }, 'Error during cleanup');
+        logger.error('Error during cleanup', error as Error);
         process.exit(1);
       }
     })();
@@ -54,6 +65,17 @@ const gracefulShutdown = (signal: string): void => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-server.listen(config.port, () => {
-  logger.info({ port: config.port }, 'Server started');
-});
+// Initialize database before starting server
+void (async (): Promise<void> => {
+  try {
+    await database.connect();
+    logger.info('Database connected');
+
+    server.listen(config.port, () => {
+      logger.info(`Server started on port ${config.port}`);
+    });
+  } catch (error) {
+    logger.error('Failed to start server', error as Error);
+    process.exit(1);
+  }
+})();

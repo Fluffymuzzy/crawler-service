@@ -1,14 +1,15 @@
+import { injectable, inject } from 'inversify';
 import type { Request, Response, NextFunction } from 'express';
-import { JobRepository, JobItemRepository } from '../../db/repositories';
+import { IJobRepository } from '../../interfaces/repositories/job.repository.interface';
+import { IJobItemRepository } from '../../interfaces/repositories/job-item.repository.interface';
+import { TYPES } from '../../container/types';
 
+@injectable()
 export class JobController {
-  private jobRepo: JobRepository;
-  private jobItemRepo: JobItemRepository;
-
-  constructor() {
-    this.jobRepo = new JobRepository();
-    this.jobItemRepo = new JobItemRepository();
-  }
+  constructor(
+    @inject(TYPES.JobRepository) private jobRepo: IJobRepository,
+    @inject(TYPES.JobItemRepository) private jobItemRepo: IJobItemRepository,
+  ) {}
 
   getJobStatus = async (
     req: Request<{ jobId: string }>,

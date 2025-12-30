@@ -1,53 +1,44 @@
+import { injectable, inject } from 'inversify';
 import type { Request, Response, NextFunction } from 'express';
-import { ProfileRepository } from '../../db/repositories';
+import { IProfileService } from '../../interfaces/services/profile.service.interface';
+import { TYPES } from '../../container/types';
 
+@injectable()
 export class ProfileController {
-  private profileRepo: ProfileRepository;
-
-  constructor() {
-    this.profileRepo = new ProfileRepository();
-  }
+  constructor(@inject(TYPES.ProfileService) private profileService: IProfileService) {}
 
   searchProfiles = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { query, page = 1, limit = 20 } = req.query;
 
-      const skip = (Number(page) - 1) * Number(limit);
+      const pageNum = Number(page);
+      const limitNum = Number(limit);
 
-      let profiles;
-      let total;
+      let result;
 
       if (query && typeof query === 'string') {
-        // Use the search method for text search
-        profiles = await this.profileRepo.search(query, Number(limit));
-        // For simplicity, we'll use the same search for count
-        // In production, you might want a separate count method
-        const allResults = await this.profileRepo.search(query, 1000);
-        total = allResults.length;
-
-        // Apply pagination to search results
-        profiles = profiles.slice(skip, skip + Number(limit));
+        result = await this.profileService.searchProfiles(query, pageNum, limitNum);
       } else {
-        // Get all profiles with pagination
-        profiles = await this.profileRepo.findMany({
-          orderBy: { scrapedAt: 'desc' },
-          skip,
-          take: Number(limit),
-        });
-        total = await this.profileRepo.count();
+        result = await this.profileService.getProfiles(pageNum, limitNum);
       }
 
-      const items = profiles.map((profile) => ({
+      const items = result.profiles.map((profile) => ({
         sourceUrl: profile.sourceUrl,
         username: profile.username,
         displayName: profile.displayName,
         avatarUrl: profile.avatarUrl,
+        bio: profile.bio,
+        coverUrl: profile.coverUrl,
+        publicStats: profile.publicStats,
+        links: profile.links,
+        rawHtmlChecksum: profile.rawHtmlChecksum,
+        scrapedAt: profile.scrapedAt,
       }));
 
       res.json({
-        page: Number(page),
-        limit: Number(limit),
-        total,
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
         items,
       });
     } catch (error) {

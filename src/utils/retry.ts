@@ -56,7 +56,7 @@ export async function withRetry<T>(
     } catch (error) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      const shouldRetry = config.shouldRetry(error, attempt);
+      const shouldRetry = config.shouldRetry(lastError as RetryableError, attempt);
 
       if (!shouldRetry || attempt === config.maxAttempts) {
         logger.error(

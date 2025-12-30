@@ -1,19 +1,20 @@
+import { injectable, inject } from 'inversify';
 import type { Request, Response, NextFunction } from 'express';
 import type { CrawlRequest } from '../validation';
-import { QueueService } from '../../services';
-import { JobRepository, JobItemRepository } from '../../db/repositories';
-import { logger } from '../../utils/logger';
+import { IQueueService } from '../../interfaces/services/queue.service.interface';
+import { IJobRepository } from '../../interfaces/repositories/job.repository.interface';
+import { IJobItemRepository } from '../../interfaces/repositories/job-item.repository.interface';
+import { ILogger } from '../../interfaces/external/logger.interface';
+import { TYPES } from '../../container/types';
 
+@injectable()
 export class CrawlController {
-  private queueService: QueueService;
-  private jobRepo: JobRepository;
-  private jobItemRepo: JobItemRepository;
-
-  constructor() {
-    this.queueService = new QueueService();
-    this.jobRepo = new JobRepository();
-    this.jobItemRepo = new JobItemRepository();
-  }
+  constructor(
+    @inject(TYPES.QueueService) private queueService: IQueueService,
+    @inject(TYPES.JobRepository) private jobRepo: IJobRepository,
+    @inject(TYPES.JobItemRepository) private jobItemRepo: IJobItemRepository,
+    @inject(TYPES.Logger) private logger: ILogger,
+  ) {}
 
   createCrawlJob = async (
     req: Request<object, object, CrawlRequest>,
@@ -26,17 +27,19 @@ export class CrawlController {
       // Remove duplicates
       const uniqueUrls = [...new Set(urls)];
 
-      logger.info({ urlCount: uniqueUrls.length, priority }, 'Creating crawl job');
+      this.logger.info('Creating crawl job', { urlCount: uniqueUrls.length, priority });
 
       // Create job
       const job = await this.jobRepo.create({
         total: uniqueUrls.length,
-        priority,
+        processed: 0,
+        failed: 0,
+        priority: priority ?? 'normal',
         status: 'queued',
       });
 
       // Create job items
-      await this.jobItemRepo.createMany(
+      await this.jobItemRepo.bulkCreate(
         uniqueUrls.map((url) => ({
           jobId: job.id,
           url,
@@ -44,9 +47,9 @@ export class CrawlController {
       );
 
       // Enqueue job
-      await this.queueService.enqueueCrawlJob(job.id);
+      await this.queueService.enqueueCrawlJob(job.id, uniqueUrls);
 
-      logger.info({ jobId: job.id }, 'Crawl job created and queued');
+      this.logger.info('Crawl job created and queued', { jobId: job.id });
 
       res.status(201).json({
         jobId: job.id,

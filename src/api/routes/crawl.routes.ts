@@ -1,13 +1,18 @@
 import { Router } from 'express';
+import type { Container } from 'inversify';
 import { CrawlController } from '../controllers';
 import { validateBody } from '../middleware/validation';
 import { crawlRequestSchema } from '../validation';
 
-const router = Router();
-const controller = new CrawlController();
+export const createCrawlRoutes = (container: Container): Router => {
+  const router = Router();
+  const controller = container.get(CrawlController);
 
-router.post('/crawl', validateBody(crawlRequestSchema), (req, res, next) => {
-  void controller.createCrawlJob(req, res, next);
-});
+  router.post('/crawl', validateBody(crawlRequestSchema), (req, res, next) => {
+    controller.createCrawlJob(req, res, next).catch(next);
+  });
 
-export default router;
+  return router;
+};
+
+export default createCrawlRoutes;

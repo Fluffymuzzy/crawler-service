@@ -7,6 +7,8 @@ let crawlQueue: Queue<CrawlJobData> | null = null;
 
 export interface CrawlJobData {
   jobId: string;
+  profileIds: string[];
+  timestamp: number;
 }
 
 export const getCrawlQueue = (): Queue<CrawlJobData> => {

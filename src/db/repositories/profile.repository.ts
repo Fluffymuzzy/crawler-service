@@ -1,52 +1,64 @@
+import { injectable, inject } from 'inversify';
 import type { Profile, Prisma } from '@prisma/client';
-import { prisma } from '../prisma';
+import {
+  IProfileRepository,
+  ProfileCreateData,
+} from '../../interfaces/repositories/profile.repository.interface';
+import { IDatabase } from '../../interfaces/external/database.interface';
+import { TYPES } from '../../container/types';
+import { PrismaDatabase } from '../prisma-database';
 
-export class ProfileRepository {
-  async create(data: {
-    sourceUrl: string;
-    username?: string | null;
-    displayName?: string | null;
-    bio?: string | null;
-    avatarUrl?: string | null;
-    coverUrl?: string | null;
-    publicStats?: Prisma.InputJsonValue | null;
-    links?: Prisma.InputJsonValue | null;
-    scrapedAt: Date;
-    rawHtmlChecksum: string;
-  }): Promise<Profile> {
+@injectable()
+export class ProfileRepository implements IProfileRepository {
+  private prisma: PrismaDatabase;
+
+  constructor(@inject(TYPES.Database) database: IDatabase) {
+    this.prisma = database as PrismaDatabase;
+  }
+
+  async create(data: Omit<Profile, 'id' | 'createdAt' | 'updatedAt'>): Promise<Profile> {
+    console.log('ProfileRepository.create called with:', JSON.stringify(data, null, 2));
+    
     // Filter out null values to avoid Prisma type issues
     const cleanData = Object.fromEntries(
       Object.entries(data).filter(([_, value]) => value !== null),
     ) as Prisma.ProfileCreateInput;
 
-    return prisma.profile.create({
+    console.log('Cleaned data for Prisma:', JSON.stringify(cleanData, null, 2));
+
+    return this.prisma.profile.create({
       data: cleanData,
     });
   }
 
   async findById(id: string): Promise<Profile | null> {
-    return prisma.profile.findUnique({
+    return this.prisma.profile.findUnique({
       where: { id },
     });
   }
 
   async findBySourceUrl(sourceUrl: string): Promise<Profile | null> {
-    return prisma.profile.findUnique({
+    return this.prisma.profile.findUnique({
       where: { sourceUrl },
     });
   }
 
-  async findMany(params?: {
-    where?: Prisma.ProfileWhereInput;
+  async findMany(filter?: Prisma.ProfileWhereInput): Promise<Profile[]> {
+    return this.prisma.profile.findMany({
+      where: filter,
+    });
+  }
+
+  async findManyWithPagination(options: {
+    skip: number;
+    take: number;
     orderBy?: Prisma.ProfileOrderByWithRelationInput;
-    take?: number;
-    skip?: number;
   }): Promise<Profile[]> {
-    return prisma.profile.findMany(params);
+    return this.prisma.profile.findMany(options);
   }
 
   async search(query: string, limit = 20): Promise<Profile[]> {
-    return prisma.profile.findMany({
+    return this.prisma.profile.findMany({
       where: {
         OR: [
           {
@@ -74,60 +86,36 @@ export class ProfileRepository {
     });
   }
 
-  async update(
-    id: string,
-    data: Partial<{
-      username: string | null;
-      displayName: string | null;
-      bio: string | null;
-      avatarUrl: string | null;
-      coverUrl: string | null;
-      publicStats: Prisma.InputJsonValue | null;
-      links: Prisma.InputJsonValue | null;
-      scrapedAt: Date;
-      rawHtmlChecksum: string;
-    }>,
-  ): Promise<Profile> {
+  async update(id: string, data: Partial<Profile>): Promise<Profile> {
     const cleanData = Object.fromEntries(
       Object.entries(data).filter(([_, value]) => value !== null),
     ) as Prisma.ProfileUpdateInput;
 
-    return prisma.profile.update({
+    return this.prisma.profile.update({
       where: { id },
       data: cleanData,
     });
   }
 
-  async upsert(data: {
-    sourceUrl: string;
-    username?: string | null;
-    displayName?: string | null;
-    bio?: string | null;
-    avatarUrl?: string | null;
-    coverUrl?: string | null;
-    publicStats?: Prisma.InputJsonValue | null;
-    links?: Prisma.InputJsonValue | null;
-    scrapedAt: Date;
-    rawHtmlChecksum: string;
-  }): Promise<Profile> {
+  async upsert(data: ProfileCreateData): Promise<Profile> {
     const cleanData = Object.fromEntries(
       Object.entries(data).filter(([_, value]) => value !== null),
     ) as Prisma.ProfileCreateInput;
 
-    return prisma.profile.upsert({
+    return this.prisma.profile.upsert({
       where: { sourceUrl: data.sourceUrl },
       update: cleanData,
       create: cleanData,
     });
   }
 
-  async delete(id: string): Promise<Profile> {
-    return prisma.profile.delete({
+  async delete(id: string): Promise<void> {
+    await this.prisma.profile.delete({
       where: { id },
     });
   }
 
   async count(where?: Prisma.ProfileWhereInput): Promise<number> {
-    return prisma.profile.count({ where });
+    return this.prisma.profile.count({ where });
   }
 }

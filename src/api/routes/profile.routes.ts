@@ -1,13 +1,18 @@
 import { Router } from 'express';
+import type { Container } from 'inversify';
 import { ProfileController } from '../controllers';
 import { validateQuery } from '../middleware/validation';
 import { profileSearchSchema } from '../validation';
 
-const router = Router();
-const controller = new ProfileController();
+export const createProfileRoutes = (container: Container): Router => {
+  const router = Router();
+  const controller = container.get(ProfileController);
 
-router.get('/profiles', validateQuery(profileSearchSchema), (req, res, next) => {
-  void controller.searchProfiles(req, res, next);
-});
+  router.get('/profiles', validateQuery(profileSearchSchema), (req, res, next) => {
+    controller.searchProfiles(req, res, next).catch(next);
+  });
 
-export default router;
+  return router;
+};
+
+export default createProfileRoutes;

@@ -1,20 +1,74 @@
-import type { Profile, Prisma } from '@prisma/client';
-import { ProfileRepository } from '../db/repositories';
-import type { ParsedProfile } from '../parser/types';
-import { logger } from '../utils/logger';
+import { injectable, inject } from 'inversify';
+import type { Profile } from '@prisma/client';
+import {
+  IProfileService,
+  ProfileSearchResult,
+  ProfileUpdateData,
+} from '../interfaces/services/profile.service.interface';
+import { IProfileRepository } from '../interfaces/repositories/profile.repository.interface';
+import { ILogger } from '../interfaces/external/logger.interface';
+import { TYPES } from '../container/types';
 
-export class ProfileService {
-  private profileRepo: ProfileRepository;
+@injectable()
+export class ProfileService implements IProfileService {
+  constructor(
+    @inject(TYPES.ProfileRepository) private profileRepo: IProfileRepository,
+    @inject(TYPES.Logger) private logger: ILogger,
+  ) {}
 
-  constructor() {
-    this.profileRepo = new ProfileRepository();
+  async getProfiles(page: number, limit: number): Promise<ProfileSearchResult> {
+    const skip = (page - 1) * limit;
+
+    const [profiles, total] = await Promise.all([
+      this.profileRepo.findManyWithPagination({
+        skip,
+        take: limit,
+        orderBy: { scrapedAt: 'desc' },
+      }),
+      this.profileRepo.count(),
+    ]);
+
+    return {
+      profiles,
+      total,
+      page,
+      limit,
+    };
   }
 
-  async saveOrUpdateProfile(parsed: ParsedProfile): Promise<Profile> {
+  async searchProfiles(query: string, page: number, limit: number): Promise<ProfileSearchResult> {
+    // For search, we use a simpler approach without skip
+    const profiles = await this.profileRepo.search(query, limit);
+
+    // For total count in search, we need to get all matching results
+    // This is not ideal but matches the current implementation
+    const allResults = await this.profileRepo.search(query, 1000);
+    const total = allResults.length;
+
+    // Apply pagination manually for search results
+    const startIndex = (page - 1) * limit;
+    const paginatedProfiles = profiles.slice(startIndex, startIndex + limit);
+
+    return {
+      profiles: paginatedProfiles,
+      total,
+      page,
+      limit,
+    };
+  }
+
+  async getProfileById(id: string): Promise<Profile | null> {
+    return this.profileRepo.findById(id);
+  }
+
+  async saveOrUpdateProfile(parsed: ProfileUpdateData): Promise<Profile> {
     const existing = await this.profileRepo.findBySourceUrl(parsed.sourceUrl);
 
     if (!existing) {
-      logger.info({ sourceUrl: parsed.sourceUrl }, 'Creating new profile');
+      this.logger.info('Creating new profile', { 
+        sourceUrl: parsed.sourceUrl,
+        checksum: parsed.rawHtmlChecksum?.substring(0, 8)
+      });
       return this.profileRepo.create({
         sourceUrl: parsed.sourceUrl,
         username: parsed.username,
@@ -22,7 +76,7 @@ export class ProfileService {
         bio: parsed.bio,
         avatarUrl: parsed.avatarUrl,
         coverUrl: parsed.coverUrl,
-        publicStats: parsed.publicStats ? (parsed.publicStats as Prisma.InputJsonValue) : null,
+        publicStats: parsed.publicStats,
         links: parsed.links,
         scrapedAt: parsed.scrapedAt,
         rawHtmlChecksum: parsed.rawHtmlChecksum,
@@ -30,23 +84,20 @@ export class ProfileService {
     }
 
     if (existing.rawHtmlChecksum === parsed.rawHtmlChecksum) {
-      logger.info(
-        { sourceUrl: parsed.sourceUrl, checksum: parsed.rawHtmlChecksum },
-        'Profile unchanged, updating scrapedAt only',
-      );
+      this.logger.info('Profile checksum matches, skipping update', {
+        sourceUrl: parsed.sourceUrl,
+        checksum: parsed.rawHtmlChecksum,
+      });
       return this.profileRepo.update(existing.id, {
         scrapedAt: parsed.scrapedAt,
       });
     }
 
-    logger.info(
-      {
-        sourceUrl: parsed.sourceUrl,
-        oldChecksum: existing.rawHtmlChecksum,
-        newChecksum: parsed.rawHtmlChecksum,
-      },
-      'Profile changed, updating all fields',
-    );
+    this.logger.info('Profile changed, updating all fields', {
+      sourceUrl: parsed.sourceUrl,
+      oldChecksum: existing.rawHtmlChecksum,
+      newChecksum: parsed.rawHtmlChecksum,
+    });
 
     return this.profileRepo.update(existing.id, {
       username: parsed.username,
@@ -54,7 +105,7 @@ export class ProfileService {
       bio: parsed.bio,
       avatarUrl: parsed.avatarUrl,
       coverUrl: parsed.coverUrl,
-      publicStats: parsed.publicStats ? (parsed.publicStats as Prisma.InputJsonValue) : null,
+      publicStats: parsed.publicStats,
       links: parsed.links,
       scrapedAt: parsed.scrapedAt,
       rawHtmlChecksum: parsed.rawHtmlChecksum,

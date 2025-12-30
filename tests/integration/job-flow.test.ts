@@ -1,24 +1,36 @@
-import { QueueService } from '../../src/services';
-import { JobRepository, JobItemRepository } from '../../src/db/repositories';
+import { configureContainer } from '../../src/container/container.config';
+import { TYPES } from '../../src/container/types';
 import { getCrawlQueue } from '../../src/queue/crawl.queue';
 import { getRedisConnection } from '../../src/queue/connection';
-import { prismaService } from '../../src/db/prisma';
+import type { Container } from 'inversify';
+import type { IQueueService } from '../../src/interfaces/services/queue.service.interface';
+import type { IJobRepository } from '../../src/interfaces/repositories/job.repository.interface';
+import type { IJobItemRepository } from '../../src/interfaces/repositories/job-item.repository.interface';
+import { PrismaDatabase } from '../../src/db/prisma-database';
 import type { JobStatus } from '@prisma/client';
 
 describe('Integration: Job Flow', () => {
-  let queueService: QueueService;
-  let jobRepo: JobRepository;
-  let jobItemRepo: JobItemRepository;
+  let container: Container;
+  let queueService: IQueueService;
+  let jobRepo: IJobRepository;
+  let jobItemRepo: IJobItemRepository;
+  let database: PrismaDatabase;
 
   beforeAll(async () => {
+    container = configureContainer();
+    queueService = container.get<IQueueService>(TYPES.QueueService);
+    jobRepo = container.get<IJobRepository>(TYPES.JobRepository);
+    jobItemRepo = container.get<IJobItemRepository>(TYPES.JobItemRepository);
+    database = container.get<PrismaDatabase>(TYPES.Database);
+    
     // Connect to test database
-    await prismaService.connect();
+    await database.connect();
   });
 
   afterAll(async () => {
     // Clean up test data and connections
-    await prismaService.client.job.deleteMany({});
-    await prismaService.disconnect();
+    await database.job.deleteMany({});
+    await database.disconnect();
 
     // Clear queue
     const queue = getCrawlQueue();
@@ -31,23 +43,20 @@ describe('Integration: Job Flow', () => {
 
   beforeEach(async () => {
     // Clean database before each test
-    await prismaService.client.jobItem.deleteMany({});
-    await prismaService.client.job.deleteMany({});
+    await database.jobItem.deleteMany({});
+    await database.job.deleteMany({});
 
     // Clear queue completely
     const queue = getCrawlQueue();
     await queue.obliterate({ force: true });
-
-    // Initialize repositories
-    queueService = new QueueService();
-    jobRepo = new JobRepository();
-    jobItemRepo = new JobItemRepository();
   });
 
   test('should create and manage job lifecycle', async () => {
     // Create a job
     const job = await jobRepo.create({
       total: 3,
+      processed: 0,
+      failed: 0,
       priority: 'normal',
       status: 'queued',
     });
@@ -70,6 +79,10 @@ describe('Integration: Job Flow', () => {
       urls.map((url) => ({
         jobId: job.id,
         url,
+        status: 'pending',
+        error: null,
+        attempts: 0,
+        lastStatusCode: null,
       })),
     );
 
@@ -79,7 +92,8 @@ describe('Integration: Job Flow', () => {
     expect(items.every((item) => item.status === 'pending')).toBe(true);
 
     // Enqueue the job
-    await queueService.enqueueCrawlJob(job.id);
+    const profileIds = items.map(item => item.id);
+    await queueService.enqueueCrawlJob(job.id, profileIds);
 
     // Verify job was enqueued
     const queue = getCrawlQueue();
@@ -142,6 +156,8 @@ describe('Integration: Job Flow', () => {
   test('should handle job status transitions', async () => {
     const job = await jobRepo.create({
       total: 1,
+      processed: 0,
+      failed: 0,
       priority: 'high',
       status: 'queued',
     });
@@ -165,6 +181,8 @@ describe('Integration: Job Flow', () => {
   test('should prevent duplicate URLs within same job', async () => {
     const job = await jobRepo.create({
       total: 2,
+      processed: 0,
+      failed: 0,
       priority: 'normal',
       status: 'queued',
     });
@@ -173,6 +191,10 @@ describe('Integration: Job Flow', () => {
     await jobItemRepo.create({
       jobId: job.id,
       url: 'https://example.com/duplicate',
+      status: 'pending',
+      error: null,
+      attempts: 0,
+      lastStatusCode: null,
     });
 
     // Try to create duplicate - should throw error
@@ -180,6 +202,10 @@ describe('Integration: Job Flow', () => {
       jobItemRepo.create({
         jobId: job.id,
         url: 'https://example.com/duplicate',
+        status: 'pending',
+        error: null,
+        attempts: 0,
+        lastStatusCode: null,
       }),
     ).rejects.toThrow();
   });
@@ -192,11 +218,13 @@ describe('Integration: Job Flow', () => {
     for (let i = 0; i < 3; i++) {
       const job = await jobRepo.create({
         total: 1,
+        processed: 0,
+        failed: 0,
         priority: i === 0 ? 'high' : 'normal',
         status: 'queued',
       });
       jobIds.push(job.id);
-      await queueService.enqueueCrawlJob(job.id);
+      await queueService.enqueueCrawlJob(job.id, ['test-profile-id']);
     }
 
     // Check queue counts

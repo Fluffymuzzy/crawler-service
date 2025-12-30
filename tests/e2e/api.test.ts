@@ -1,7 +1,10 @@
 import request from 'supertest';
 import { createApp } from '../../src/app';
 import type { Application } from 'express';
-import { prismaService } from '../../src/db/prisma';
+import { configureContainer } from '../../src/container/container.config';
+import type { Container } from 'inversify';
+import { TYPES } from '../../src/container/types';
+import { PrismaDatabase } from '../../src/db/prisma-database';
 import { getCrawlQueue } from '../../src/queue/crawl.queue';
 import { getRedisConnection } from '../../src/queue/connection';
 import type {
@@ -13,24 +16,29 @@ import type {
 
 describe('E2E: HTTP API', () => {
   let app: Application;
+  let container: Container;
+  let database: PrismaDatabase;
 
   beforeAll(async () => {
-    app = createApp();
+    container = configureContainer();
+    app = createApp(container);
+    database = container.get<PrismaDatabase>(TYPES.Database);
+    
     // Connect to test database
-    await prismaService.connect();
+    await database.connect();
 
     // Clean all data before tests
-    await prismaService.client.jobItem.deleteMany({});
-    await prismaService.client.job.deleteMany({});
-    await prismaService.client.profile.deleteMany({});
+    await database.jobItem.deleteMany({});
+    await database.job.deleteMany({});
+    await database.profile.deleteMany({});
   });
 
   afterAll(async () => {
     // Clean up test data
-    await prismaService.client.jobItem.deleteMany({});
-    await prismaService.client.job.deleteMany({});
-    await prismaService.client.profile.deleteMany({});
-    await prismaService.disconnect();
+    await database.jobItem.deleteMany({});
+    await database.job.deleteMany({});
+    await database.profile.deleteMany({});
+    await database.disconnect();
 
     // Clear queue
     const queue = getCrawlQueue();
@@ -43,8 +51,8 @@ describe('E2E: HTTP API', () => {
 
   afterEach(async () => {
     // Clean up after each test to avoid interference
-    await prismaService.client.jobItem.deleteMany({});
-    await prismaService.client.job.deleteMany({});
+    await database.jobItem.deleteMany({});
+    await database.job.deleteMany({});
 
     // Clear queue
     const queue = getCrawlQueue();
@@ -159,10 +167,10 @@ describe('E2E: HTTP API', () => {
 
   test('should search profiles with pagination', async () => {
     // Clean profiles first
-    await prismaService.client.profile.deleteMany({});
+    await database.profile.deleteMany({});
 
     // Create test profiles
-    await prismaService.client.profile.createMany({
+    await database.profile.createMany({
       data: [
         {
           sourceUrl: 'https://example.com/alice',

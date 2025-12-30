@@ -1,11 +1,27 @@
-import type { Job, JobStatus, JobPriority, Prisma } from '@prisma/client';
-import { prisma } from '../prisma';
+import { injectable, inject } from 'inversify';
+import type { Job, JobStatus, Prisma } from '@prisma/client';
+import {
+  IJobRepository,
+  JobWithItems,
+} from '../../interfaces/repositories/job.repository.interface';
+import { IDatabase } from '../../interfaces/external/database.interface';
+import { TYPES } from '../../container/types';
+import { PrismaDatabase } from '../prisma-database';
 
-export class JobRepository {
-  async create(data: { total: number; priority?: JobPriority; status?: JobStatus }): Promise<Job> {
-    return prisma.job.create({
+@injectable()
+export class JobRepository implements IJobRepository {
+  private prisma: PrismaDatabase;
+
+  constructor(@inject(TYPES.Database) database: IDatabase) {
+    this.prisma = database as PrismaDatabase;
+  }
+
+  async create(data: Omit<Job, 'id' | 'createdAt' | 'updatedAt'>): Promise<Job> {
+    return this.prisma.job.create({
       data: {
         total: data.total,
+        processed: data.processed ?? 0,
+        failed: data.failed ?? 0,
         priority: data.priority ?? 'normal',
         status: data.status ?? 'queued',
       },
@@ -13,29 +29,43 @@ export class JobRepository {
   }
 
   async findById(id: string): Promise<Job | null> {
-    return prisma.job.findUnique({
+    return this.prisma.job.findUnique({
       where: { id },
     });
   }
 
-  async findMany(params?: {
-    where?: Prisma.JobWhereInput;
-    orderBy?: Prisma.JobOrderByWithRelationInput;
-    take?: number;
-    skip?: number;
-  }): Promise<Job[]> {
-    return prisma.job.findMany(params);
+  async findByIdWithItems(id: string): Promise<JobWithItems | null> {
+    return this.prisma.job.findUnique({
+      where: { id },
+      include: { items: true },
+    });
   }
 
-  async update(
-    id: string,
-    data: Partial<{
-      status: JobStatus;
-      processed: number;
-      failed: number;
-    }>,
-  ): Promise<Job> {
-    return prisma.job.update({
+  async findMany(filter?: Partial<Job>): Promise<Job[]> {
+    return this.prisma.job.findMany({
+      where: filter,
+    });
+  }
+
+  async findManyWithFilters(
+    filters: {
+      status?: JobStatus;
+      createdAt?: { gte?: Date; lte?: Date };
+    },
+    options?: {
+      take?: number;
+      skip?: number;
+      orderBy?: Prisma.JobOrderByWithRelationInput;
+    },
+  ): Promise<Job[]> {
+    return this.prisma.job.findMany({
+      where: filters,
+      ...options,
+    });
+  }
+
+  async update(id: string, data: Partial<Job>): Promise<Job> {
+    return this.prisma.job.update({
       where: { id },
       data,
     });
@@ -49,13 +79,16 @@ export class JobRepository {
     return this.update(id, { processed, failed });
   }
 
-  async delete(id: string): Promise<Job> {
-    return prisma.job.delete({
+  async delete(id: string): Promise<void> {
+    await this.prisma.job.delete({
       where: { id },
     });
   }
 
-  async count(where?: Prisma.JobWhereInput): Promise<number> {
-    return prisma.job.count({ where });
+  async countWithFilters(filters: {
+    status?: JobStatus;
+    createdAt?: { gte?: Date; lte?: Date };
+  }): Promise<number> {
+    return this.prisma.job.count({ where: filters });
   }
 }
